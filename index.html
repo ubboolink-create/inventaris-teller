@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventaris Tellen (Gedeeld & Realtime)</title>
+    <!-- Laad Tailwind CSS voor snelle en responsieve styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styling voor duidelijke weergave in magazijnomgeving */
+        :root {
+            --primary-color: #3b82f6; /* Tailwind blue-500 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Grijsachtige achtergrond */
+        }
+        .count-input {
+            font-size: 2.5rem; /* Grote tekst voor tellen */
+            text-align: center;
+        }
+        .big-text {
+            font-size: 4rem;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-start justify-center p-4 sm:p-8">
+
+    <div id="app" class="w-full max-w-4xl bg-white shadow-2xl rounded-xl p-6 sm:p-10">
+        <h1 class="text-3xl font-bold text-gray-800 border-b pb-4 mb-3">Gedeelde Inventaris Tellen App</h1>
+        <p class="text-sm text-gray-600 mb-6">Uw Tellers ID: <span id="user-id" class="font-mono text-blue-600 break-all">Laden...</span></p>
+
+        <!-- Status en Laadgebied -->
+        <p id="status-message" class="text-sm text-gray-700 mt-2 mb-6 font-semibold"></p>
+
+        <!-- SCHERM 1: Job Selectie & Upload -->
+        <div id="job-selection-area" class="space-y-6">
+            <h2 class="text-2xl font-semibold text-gray-800">1. Kies een Tel-Opdracht</h2>
+            <div id="job-list" class="space-y-3 p-4 border rounded-lg bg-gray-50">
+                <p>Tel-opdrachten laden...</p>
+            </div>
+
+            <h2 class="text-2xl font-semibold text-gray-800 pt-4 border-t">2. Nieuwe Lijst Uploaden</h2>
+            <div class="space-y-4 p-4 border rounded-lg bg-red-50/50">
+                <input type="text" id="job-name-input" placeholder="Naam voor nieuwe lijst (bijv. Week 47 Inventaris)" class="w-full p-2 border border-gray-300 rounded-lg">
+                <input type="file" id="csvFileInput" accept=".csv" class="w-full p-2 border border-gray-300 rounded-lg">
+                <button onclick="uploadInventoryJob()" class="w-full py-3 px-4 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-md transition duration-150">
+                    Upload & Start Nieuwe Opdracht
+                </button>
+            </div>
+        </div>
+        
+        <!-- SCHERM 2: Tel-interface (standaard verborgen) -->
+        <div id="count-interface" class="hidden space-y-8">
+            <h2 class="text-xl font-semibold text-gray-700">Bezig met Opdracht: <span id="current-job-name" class="text-blue-600"></span></h2>
+
+            <!-- Huidige Locatie en Artikel Weergave -->
+            <div class="p-6 bg-blue-500 rounded-xl text-white shadow-lg">
+                <h2 class="text-xl font-semibold opacity-80 mb-2">Locatie (Kolom P):</h2>
+                <div id="current-location" class="big-text"></div>
+            </div>
+
+            <div class="p-6 bg-gray-100 rounded-xl shadow-inner">
+                <h2 class="text-xl font-semibold text-gray-700 mb-2">Artikelnummer (Kolom S):</h2>
+                <div id="current-article" class="text-3xl font-mono text-gray-900"></div>
+            </div>
+            
+            <p id="progress-message" class="text-center text-lg font-medium text-gray-700">Claimt nieuwe items...</p>
+
+            <!-- Invoer en Bevestiging -->
+            <div class="space-y-4">
+                <label for="counted-amount" class="block text-xl font-semibold text-gray-800">Geteld aantal (Kolom V)</label>
+                <input type="number" id="counted-amount" class="count-input w-full p-4 border-4 border-blue-300 focus:border-blue-500 rounded-lg outline-none transition duration-200" placeholder="Voer geteld aantal in" pattern="\d*" inputmode="numeric">
+                <button onclick="submitCount()" id="submit-button" class="w-full py-4 bg-blue-500 hover:bg-blue-600 text-white font-bold text-xl rounded-lg shadow-xl transition duration-150 transform hover:scale-[1.01]">
+                    Bevestig & Volgende Locatie
+                </button>
+                <button onclick="claimNewBatch()" class="w-full py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold rounded-lg transition duration-150 mt-2">
+                    Nieuwe items claimen (Handmatig)
+                </button>
+                <p id="error-message" class="text-red-500 text-sm h-4"></p>
+            </div>
+            <button onclick="showJobSelection()" class="w-full text-center text-sm text-gray-500 hover:text-gray-700 mt-4">Terug naar Job Selectie</button>
+        </div>
+
+        <!-- SCHERM 3: Voltooiing en Downloadgebied (standaard verborgen) -->
+        <div id="finish-area" class="hidden text-center p-10 bg-green-100 rounded-xl">
+            <h2 class="text-3xl font-bold text-green-700 mb-4">Opdracht Voltooid!</h2>
+            <p class="text-gray-700 mb-6">U heeft alle u toegewezen items geteld, of alle items in deze job zijn geteld. </p>
+            <button onclick="downloadCSV()" class="py-3 px-8 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg shadow-lg transition duration-150">
+                Download Volledige, Bijgewerkte CSV
+            </button>
+            <button onclick="showJobSelection()" class="ml-4 py-3 px-8 bg-gray-400 hover:bg-gray-500 text-white font-bold rounded-lg shadow-lg transition duration-150">
+                Kies Nieuwe Opdracht
+            </button>
+        </div>
+
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, getDocs, writeBatch, runTransaction, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        setLogLevel('Debug');
+
+        // --- Globale variabelen van Canvas (MANDATORY USE) ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth;
+        let userId = 'unknown';
+        let isAuthReady = false;
+        
+        // State voor de huidige telling
+        let currentJobId = null;
+        let currentJobName = null;
+        let userAssignedItems = []; // De batch die de gebruiker telt
+        let currentItemIndex = 0;
+
+        // Kolom Indices (0-gebaseerd)
+        const COL_LOCATION = 15;
+        const COL_ARTICLE = 18;
+        const COL_COUNTED_STOCK = 21; // De kolom die we in de DB opslaan
+        
+        let headers = [];
+        let currentDelimiter = ',';
+
+        const ui = {
+            userIdDisplay: document.getElementById('user-id'),
+            status: document.getElementById('status-message'),
+            jobSelectionArea: document.getElementById('job-selection-area'),
+            jobList: document.getElementById('job-list'),
+            jobNameInput: document.getElementById('job-name-input'),
+            csvFileInput: document.getElementById('csvFileInput'),
+            countInterface: document.getElementById('count-interface'),
+            currentJobNameDisplay: document.getElementById('current-job-name'),
+            currentLocation: document.getElementById('current-location'),
+            currentArticle: document.getElementById('current-article'),
+            countedAmount: document.getElementById('counted-amount'),
+            errorMessage: document.getElementById('error-message'),
+            finishArea: document.getElementById('finish-area'),
+            progressMessage: document.getElementById('progress-message')
+        };
+
+        // --- INITIALISATIE & AUTHENTICATIE ---
+
+        async function initFirebase() {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    throw new Error("Firebase config is niet beschikbaar.");
+                }
+
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Meld de gebruiker aan
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        ui.userIdDisplay.textContent = userId;
+                        isAuthReady = true;
+                        ui.status.textContent = 'Verbonden met database. Haal tel-opdrachten op.';
+                        loadInventoryJobs();
+                    } else {
+                        ui.status.textContent = 'Authenticatie mislukt. Probeer opnieuw.';
+                    }
+                });
+
+            } catch (error) {
+                console.error("Fout bij het initialiseren van Firebase:", error);
+                ui.status.textContent = `Fout: Kan geen verbinding maken met de database. ${error.message}`;
+            }
+        }
+        
+        // --- CSV PARSING FUNCTIES (Aangepast van eerdere versies) ---
+
+        function detectDelimiter(headerLine) {
+            return headerLine.includes(';') ? ';' : ','; 
+        }
+
+        function parseCSV(csvText) {
+            const lines = csvText.split(/\r\n|\n/).filter(line => line.trim() !== '');
+            if (lines.length === 0) return { rows: [], headers: [] };
+
+            const headerLine = lines[0];
+            currentDelimiter = detectDelimiter(headerLine);
+            
+            headers = headerLine.split(currentDelimiter).map(h => h.trim());
+            const dataLines = lines.slice(1);
+            
+            const rows = dataLines.map(line => {
+                return line.split(currentDelimiter).map(cell => cell.trim().replace(/^"|"$/g, ''));
+            });
+
+            return { rows, headers };
+        }
+
+        function dataToCSV(dataRows) {
+            const csvLines = [];
+            // Gebruik de headers die bij het uploaden zijn opgeslagen
+            csvLines.push(headers.join(currentDelimiter)); 
+
+            dataRows.forEach(row => {
+                const safeRow = row.map(cell => {
+                    if (String(cell).includes(currentDelimiter) || String(cell).includes('"')) {
+                        return `"${String(cell).replace(/"/g, '""')}"`;
+                    }
+                    return cell;
+                });
+                csvLines.push(safeRow.join(currentDelimiter));
+            });
+
+            return csvLines.join('\n');
+        }
+
+        // --- UI WEERGAVE FUNCTIES ---
+
+        function hideAllScreens() {
+            ui.jobSelectionArea.classList.add('hidden');
+            ui.countInterface.classList.add('hidden');
+            ui.finishArea.classList.add('hidden');
+        }
+
+        function showJobSelection() {
+            hideAllScreens();
+            ui.jobSelectionArea.classList.remove('hidden');
+            loadInventoryJobs(); // Laad de lijst opnieuw
+        }
+        
+        function showCountInterface() {
+            hideAllScreens();
+            ui.countInterface.classList.remove('hidden');
+            ui.currentJobNameDisplay.textContent = currentJobName;
+            // Start met tellen
+            renderItem();
+        }
+        
+        function showFinishArea() {
+            hideAllScreens();
+            ui.finishArea.classList.remove('hidden');
+        }
+
+        // --- FIREBASE OPSLAG & SYNCHRONISATIE ---
+
+        // Collectiepad voor openbare tel-opdrachten
+        function getJobCollectionRef() {
+            return collection(db, `/artifacts/${appId}/public/data/inventory_jobs`);
+        }
+        
+        // Collectiepad voor de items binnen een specifieke job
+        function getItemCollectionRef(jobId) {
+            return collection(db, `/artifacts/${appId}/public/data/inventory_jobs/${jobId}/items`);
+        }
+
+        /**
+         * Uploadt het CSV-bestand als een nieuwe job naar Firestore.
+         */
+        window.uploadInventoryJob = async function() {
+            if (!isAuthReady) {
+                ui.status.textContent = 'Wacht op verbinding met database...';
+                return;
+            }
+            
+            const jobName = ui.jobNameInput.value.trim();
+            const file = ui.csvFileInput.files[0];
+
+            if (!jobName || !file) {
+                ui.status.textContent = 'Vul een naam in en selecteer een CSV-bestand.';
+                return;
+            }
+
+            ui.status.textContent = 'Bezig met uploaden en parsen...';
+
+            // 1. CSV lezen en parsen
+            const csvText = await file.text();
+            const { rows, headers: parsedHeaders } = parseCSV(csvText);
+
+            if (rows.length === 0) {
+                ui.status.textContent = 'Fout: Geen gegevens gevonden in het CSV-bestand.';
+                return;
+            }
+            
+            headers = parsedHeaders; // Sla de headers globaal op voor later downloaden
+
+            // 2. Job Metadata aanmaken
+            const newJobId = 'job_' + Date.now();
+            const jobDocRef = doc(getJobCollectionRef(), newJobId);
+            
+            await setDoc(jobDocRef, {
+                name: jobName,
+                uploaderId: userId,
+                uploadDate: Timestamp.now(),
+                totalItems: rows.length,
+                isFinished: false,
+                headers: headers,
+                delimiter: currentDelimiter // Sla scheidingsteken op voor download
+            });
+
+            // 3. Items in Batch schrijven
+            const itemCollectionRef = getItemCollectionRef(newJobId);
+            let batch = writeBatch(db);
+            let batchCount = 0;
+            
+            rows.forEach((row, index) => {
+                // Item structuur
+                const itemData = {
+                    location: row.length > COL_LOCATION ? row[COL_LOCATION] : '',
+                    article: row.length > COL_ARTICLE ? row[COL_ARTICLE] : '',
+                    initialRowData: JSON.stringify(row), // De complete, originele rij als JSON-string
+                    counted_stock: null, // De waarde die we willen updaten
+                    counted_by: null, // De gebruiker die geteld heeft (voor de taakverdeling)
+                    status: 'NOG TE TELLEN' // Voor het gemak
+                };
+                
+                const itemDocRef = doc(itemCollectionRef, String(index)); // Gebruik index als document ID
+                batch.set(itemDocRef, itemData);
+                batchCount++;
+
+                if (batchCount >= 499) { // Max 500 operaties per batch
+                    batch.commit();
+                    batch = writeBatch(db);
+                    batchCount = 0;
+                }
+            });
+
+            await batch.commit();
+
+            ui.status.textContent = `Succesvol ${rows.length} items geüpload voor opdracht: ${jobName}.`;
+            ui.jobNameInput.value = '';
+            ui.csvFileInput.value = '';
+            loadInventoryJobs(); // Vernieuw de lijst
+        };
+
+        /**
+         * Laadt de lijst met beschikbare tel-opdrachten (jobs).
+         */
+        function loadInventoryJobs() {
+            if (!isAuthReady) return;
+
+            const q = query(getJobCollectionRef());
+
+            onSnapshot(q, (snapshot) => {
+                ui.jobList.innerHTML = '';
+                if (snapshot.empty) {
+                    ui.jobList.innerHTML = '<p class="text-gray-500">Nog geen tel-opdrachten geüpload. Upload de eerste lijst!</p>';
+                    return;
+                }
+
+                snapshot.forEach((doc) => {
+                    const job = doc.data();
+                    const jobDiv = document.createElement('div');
+                    jobDiv.className = 'flex justify-between items-center p-3 bg-white rounded-md shadow-sm cursor-pointer hover:bg-blue-100 transition';
+                    jobDiv.innerHTML = `
+                        <span class="font-medium text-gray-800">${job.name}</span>
+                        <span class="text-sm text-gray-500">${job.totalItems} items</span>
+                        <button class="py-1 px-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600" data-job-id="${doc.id}" data-job-name="${job.name}">Start Tellen</button>
+                    `;
+                    ui.jobList.appendChild(jobDiv);
+                    
+                    jobDiv.querySelector('button').addEventListener('click', (e) => {
+                        currentJobId = e.target.getAttribute('data-job-id');
+                        currentJobName = e.target.getAttribute('data-job-name');
+                        startCountingSession();
+                    });
+                });
+                
+                ui.status.textContent = 'Kies een opdracht of upload een nieuwe.';
+            });
+        }
+        
+        /**
+         * Start een telsessie door een batch ongeclaimde items op te halen en toe te wijzen.
+         */
+        window.startCountingSession = async function() {
+            if (!currentJobId) return;
+
+            // 1. Laad headers en delimiter voor deze job (nodig voor download)
+            await loadJobMetadata(currentJobId);
+            
+            // 2. Claim de eerste batch
+            showCountInterface();
+            await claimNewBatch();
+        }
+
+        /**
+         * Laadt de headers en delimiter van de geselecteerde Job.
+         */
+        async function loadJobMetadata(jobId) {
+            const jobDoc = await getDoc(doc(getJobCollectionRef(), jobId));
+            if (jobDoc.exists()) {
+                const jobData = jobDoc.data();
+                headers = jobData.headers || [];
+                currentDelimiter = jobData.delimiter || ',';
+            }
+        }
+
+
+        /**
+         * Probeert een nieuwe batch ongeclaimde items (max. 20) toe te wijzen aan de gebruiker.
+         * Dit is de "Kevin's lijst" functionaliteit.
+         */
+        window.claimNewBatch = async function() {
+            if (!isAuthReady || !currentJobId) return;
+            
+            ui.progressMessage.textContent = 'Nieuwe locaties claimen...';
+            
+            const BATCH_SIZE = 20;
+            const itemCollectionRef = getItemCollectionRef(currentJobId);
+            
+            // Query voor items die nog niet geteld zijn
+            const q = query(
+                itemCollectionRef, 
+                where('counted_by', '==', null),
+                where('status', '==', 'NOG TE TELLEN') // Extra veiligheidscheck
+            );
+
+            try {
+                // Gebruik een Firestore Transaction om de claim atomisch te maken
+                const newItems = await runTransaction(db, async (transaction) => {
+                    const snapshot = await transaction.get(q);
+                    
+                    if (snapshot.empty) {
+                        return null; // Geen items meer om te tellen
+                    }
+
+                    const itemsToClaim = snapshot.docs.slice(0, BATCH_SIZE);
+                    const claimedItems = [];
+
+                    itemsToClaim.forEach(docSnapshot => {
+                        const itemDocRef = docSnapshot.ref;
+                        // Claim het item door de 'claimed_by' en status bij te werken
+                        transaction.update(itemDocRef, {
+                            status: 'BEZIG',
+                            claimed_by: userId
+                        });
+                        claimedItems.push({ id: docSnapshot.id, ...docSnapshot.data() });
+                    });
+                    
+                    return claimedItems;
+                });
+                
+                if (newItems === null) {
+                    ui.progressMessage.textContent = 'Alle items in deze opdracht zijn geteld of in behandeling.';
+                    showFinishArea();
+                    return;
+                }
+
+                if (newItems.length > 0) {
+                    userAssignedItems = newItems;
+                    currentItemIndex = 0;
+                    ui.progressMessage.textContent = `${newItems.length} nieuwe locaties toegewezen. Start met tellen.`;
+                    renderItem();
+                } else {
+                    // Dit kan gebeuren als de query net leeg was, maar de transactie nog succesvol was.
+                    ui.progressMessage.textContent = 'Geen nieuwe locaties gevonden. Probeer later opnieuw of ga naar Afronden.';
+                    showFinishArea();
+                }
+
+            } catch (e) {
+                console.error("Transactie voor claimen mislukt: ", e);
+                ui.progressMessage.textContent = 'Fout bij het claimen van items. Probeer het opnieuw.';
+            }
+        }
+
+        /**
+         * Rendert het volgende item uit de lokale batch.
+         */
+        function renderItem() {
+            ui.errorMessage.textContent = '';
+            ui.countedAmount.value = '';
+            ui.countedAmount.focus();
+            
+            if (currentItemIndex >= userAssignedItems.length) {
+                // Huidige batch is klaar, claim een nieuwe
+                ui.progressMessage.textContent = 'Batch voltooid. Claimt volgende locaties...';
+                claimNewBatch();
+                
+                // Zorg ervoor dat de UI leeg is tijdens het claimen
+                ui.currentLocation.textContent = 'Laden...';
+                ui.currentArticle.textContent = 'Laden...';
+                return;
+            }
+
+            const item = userAssignedItems[currentItemIndex];
+            
+            ui.currentLocation.textContent = item.location || 'LEEG';
+            ui.currentArticle.textContent = item.article || 'LEEG';
+            ui.countedAmount.placeholder = 'Voer geteld aantal in';
+            
+            ui.progressMessage.textContent = `Bezig met uw item ${currentItemIndex + 1} van ${userAssignedItems.length} (Totaal item: ${item.id})`;
+        }
+
+
+        /**
+         * Verwerkt de telling en schrijft direct naar Firestore.
+         */
+        window.submitCount = async function() {
+            if (currentItemIndex >= userAssignedItems.length) {
+                // Zou niet moeten gebeuren als claimNewBatch goed werkt
+                ui.errorMessage.textContent = 'Wacht op het claimen van de volgende batch.';
+                return;
+            }
+
+            const countValue = ui.countedAmount.value.trim();
+            if (countValue === '' || isNaN(countValue) || parseInt(countValue, 10) < 0) {
+                ui.errorMessage.textContent = 'Voer een geldig positief getal in voor de telling.';
+                return;
+            }
+
+            const count = parseInt(countValue, 10);
+            const currentItem = userAssignedItems[currentItemIndex];
+            const itemDocRef = doc(getItemCollectionRef(currentJobId), currentItem.id);
+
+            try {
+                // Update het document in Firestore met de telling
+                await updateDoc(itemDocRef, {
+                    counted_stock: count,
+                    counted_by: userId,
+                    countDate: Timestamp.now(),
+                    status: 'GETELD'
+                });
+                
+                // Ga naar het volgende item in de lokale batch
+                currentItemIndex++;
+                renderItem();
+
+            } catch (error) {
+                console.error("Fout bij het opslaan van de telling:", error);
+                ui.errorMessage.textContent = 'Fout bij het opslaan: Probeer opnieuw.';
+            }
+        }
+        
+        /**
+         * Downloadt de complete, samengevoegde CSV van de geselecteerde job.
+         */
+        window.downloadCSV = async function() {
+            if (!currentJobId) {
+                ui.status.textContent = 'Geen opdracht geselecteerd.';
+                return;
+            }
+            
+            ui.status.textContent = 'Haalt alle gegevens op voor download... Dit kan even duren.';
+
+            const itemCollectionRef = getItemCollectionRef(currentJobId);
+            
+            // 1. Haal alle items op
+            const snapshot = await getDocs(itemCollectionRef);
+            if (snapshot.empty) {
+                ui.status.textContent = 'Geen items gevonden in deze opdracht.';
+                return;
+            }
+            
+            // Zorg dat de headers en delimiter van de job geladen zijn
+            await loadJobMetadata(currentJobId);
+            
+            const allUpdatedRows = [];
+            
+            snapshot.forEach(docSnapshot => {
+                const item = docSnapshot.data();
+                // Parse de originele JSON-rij
+                const originalRow = JSON.parse(item.initialRowData);
+                
+                // Maak een kopie en update Kolom V
+                const updatedRow = [...originalRow];
+                // Zorg ervoor dat de rij lang genoeg is
+                 while (updatedRow.length <= COL_COUNTED_STOCK) {
+                    updatedRow.push(''); 
+                }
+                
+                // Plaats de nieuwe telling in de V-kolom
+                updatedRow[COL_COUNTED_STOCK] = item.counted_stock !== null ? item.counted_stock : ''; 
+                
+                allUpdatedRows.push(updatedRow);
+            });
+
+            // 2. Converteer naar CSV en download
+            const csvContent = dataToCSV(allUpdatedRows);
+            const blob = new Blob([csvContent], { type: `text/csv;charset=utf-8;header=present;delimiter=${currentDelimiter};` });
+            
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            
+            link.setAttribute('href', url);
+            link.setAttribute('download', `${currentJobName}_Totaal_Telleresultaat_${new Date().toISOString().slice(0, 10)}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            ui.status.textContent = 'Volledige CSV is gedownload.';
+        }
+
+        // Event listener voor de Enter-toets op het invoerveld
+        ui.countedAmount.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault(); 
+                submitCount();
+            }
+        });
+        
+        // --- START APP ---
+        document.addEventListener('DOMContentLoaded', initFirebase);
+
+    </script>
+</body>
+</html>
